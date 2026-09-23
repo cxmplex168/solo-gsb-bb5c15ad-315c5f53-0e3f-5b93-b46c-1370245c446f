@@ -1,0 +1,19 @@
+services:
+  mail-header-inspector:
+    build: .
+    image: mail-header-inspector:latest
+    container_name: mail-header-inspector
+    # 依赖在容器启动时安装；国内/内网构建可取消注释指定 PyPI 镜像
+    # environment:
+    #   PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+    #   GUNICORN_WORKERS: "2"
+    #   MAX_HEADER_CHARS: "262144"
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz').read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

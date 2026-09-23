@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>邮件投递路径分析 · Received Header Inspector</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="site-header">
+  <div class="container">
+    <h1>📮 邮件投递路径分析</h1>
+    <p>粘贴邮件原始头部（Raw / Original headers），自动展开折行、解析每一跳 Received 时间并还原中继顺序与相邻耗时。</p>
+  </div>
+</header>
+
+<main class="container">
+  <section class="card">
+    <h2>① 粘贴原始头部</h2>
+    {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('analyze_view') }}">
+      <textarea name="headers" placeholder="例如：&#10;Received: from mail-wm1.example.com (mail-wm1.example.com [203.0.113.10])&#10;        by mx.mailbox.org with ESMTPS id 7lQ2...&#10;        ; Tue, 23 Sep 2025 04:20:31 +0000&#10;Date: Tue, 23 Sep 2025 04:20:30 +0000&#10;From: alice@example.com">{{ raw_text or '' }}</textarea>
+      <div class="actions">
+        <button class="btn" type="submit">分析投递路径</button>
+        <button class="btn secondary" type="button" id="sample-btn">载入示例</button>
+        <button class="btn secondary" type="button" id="clear-btn">清空</button>
+      </div>
+    </form>
+  </section>
+
+  {% if result %}
+  <section class="card">
+    <h2>② 概览</h2>
+    <div class="stats">
+      <div class="stat"><div class="num">{{ result.stats.total }}</div><div class="label">Received 节点总数</div></div>
+      <div class="stat"><div class="num">{{ result.stats.resolved }}</div><div class="label">时间已解析节点</div></div>
+      <div class="stat"><div class="num">{{ result.stats.unresolved }}</div><div class="label">缺时 / 无法解析</div></div>
+      <div class="stat"><div class="num">{{ result.stats.anomalies }}</div><div class="label">异常提示数</div></div>
+      <div class="stat"><div class="num">{{ result.stats.span_display }}</div><div class="label">投递总耗时（最早→最晚）</div></div>
+      <div class="stat"><div class="num">{{ result.stats.folded_lines }}</div><div class="label">已展开折行续行</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>③ 中继链（按时间先后）</h2>
+    {% if result.chain %}
+    <div class="chain">
+      {% for node in result.chain %}
+        <span class="node">{{ node }}</span>
+        {% if not loop.last %}<span class="arrow">→</span>{% endif %}
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin:10px 0 0;font-size:12.5px;">
+      取每一跳的 <span class="mono">from</span> 起点与 <span class="mono">by</span> 落点串联；缺少时间的节点无法定位，未计入此链。
+    </p>
+    {% else %}
+    <p class="empty">没有可定位到时间的节点，无法构建中继链。</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>④ 逐跳明细</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>来源 from</th>
+          <th>接收 by</th>
+          <th>协议 / ID</th>
+          <th>时间（UTC，统一换算）</th>
+          <th>距上一跳耗时</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for hop in result.hops %}
+        {% if hop.sortable is false and loop.index0 == result.stats.resolved %}
+        <tr class="divider-row"><td colspan="7">以下节点缺少时间或时间无法解析，无法确定其在投递路径中的位置，按原始出现顺序保留</td></tr>
+        {% endif %}
+        <tr>
+          <td>{{ hop.order }}<div class="muted" style="font-size:11.5px;margin-top:2px;">原始 #{{ hop.received_no }}</div></td>
+          <td><span class="host">{{ hop.from or '<span class="missing">未知</span>' | safe }}</span></td>
+          <td><span class="host">{{ hop.by or '<span class="missing">未知</span>' | safe }}</span></td>
+          <td>
+            {% if hop.protocol %}<div>{{ hop.protocol }}</div>{% endif %}
+            {% if hop.message_id %}<div class="muted mono" style="font-size:11.5px;">id {{ hop.message_id }}</div>{% endif %}
+            {% if not hop.protocol and not hop.message_id %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td>
+            {% if hop.datetime_display %}
+              <div>{{ hop.datetime_display }}</div>
+              <div class="time-sub">{{ hop.tz_display }}</div>
+            {% else %}
+              <span class="muted">未解析</span>
+              {% if hop.date_raw %}<div class="time-sub">原始值：{{ hop.date_raw }}</div>{% endif %}
+            {% endif %}
+            {% if hop.reasons %}
+              <ul class="reasons {{ 'error' if hop.status == 'error' else '' }}">
+                {% for code, msg in hop.reasons %}<li>{{ msg }}</li>{% endfor %}
+              </ul>
+            {% endif %}
+          </td>
+          <td>{{ hop.delta_display }}</td>
+          <td>
+            {% if hop.status == 'ok' %}<span class="badge ok">正常</span>
+            {% elif hop.status == 'warning' %}<span class="badge warning">注意</span>
+            {% else %}<span class="badge error">异常</span>{% endif %}
+            <details class="raw">
+              <summary>原始 Received 字段</summary>
+              <pre>Received: {{ hop.raw }}</pre>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>⑤ 邮件摘要字段</h2>
+    <table class="meta-table">
+      {% for item in result.general %}
+      <tr><td>{{ item.key }}</td><td class="mono">{{ item.value or '—' }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% elif not error %}
+  <section class="card">
+    <p class="empty" style="margin:0;">等待输入。大多数邮件客户端可在“显示原始邮件 / View Source / Show Original”中找到完整头部。</p>
+  </section>
+  {% endif %}
+
+  <footer>Received Header Inspector · 纯本地解析，输入内容不会上传到任何外部服务</footer>
+</main>
+
+<script>
+const SAMPLE = `Return-Path: <alice@example.com>
+Received: from mx.mailbox.org (mx.mailbox.org [198.51.100.20])
+    by imap.mailbox.org with LMTP id 7mQ2AbCd12
+    ; Tue, 23 Sep 2025 04:20:35 +0000 (UTC)
+Received: from edge.mailbox.org (edge.mailbox.org [198.51.100.5])
+    by mx.mailbox.org with ESMTP id 6pQ1ZyXx99
+    ; Tue, 23 Sep 2025 04:20:33 +0000
+Received: from scanner.example.net (scanner.example.net [203.0.113.50])
+    by edge.mailbox.org with ESMTPS id 8nR0BcDe44
+    ; Tue, 23 Sep 2025 04:20:32 +0000
+Received: from mail.example.com (mail.example.com [203.0.113.10])
+	by scanner.example.net with ESMTP id 5oP9WvVu33;
+	Tue, 23 Sep 2025 04:20:30 +0000
+Received: from internal.lan (10.0.0.7)
+	by mail.example.com with SMTP id 4kL8Tt;
+	Mon, 31 Sep 1981 09:00:00 +0000
+Received: from workstation.local (192.168.1.5)
+	by internal.lan
+	with ESMTPA
+Date: Tue, 23 Sep 2025 04:20:29 +0000
+From: Alice <alice@example.com>
+To: Bob <bob@mailbox.org>
+Subject: =?UTF-8?B?5rWL6K+V5rWL6K+V5oiR5piv56ys5LiA5p2l?=
+Message-ID: <20250923042029.AB12@example.com>
+`;
+document.getElementById('sample-btn').addEventListener('click', () => {
+  document.querySelector('textarea[name="headers"]').value = SAMPLE;
+});
+document.getElementById('clear-btn').addEventListener('click', () => {
+  document.querySelector('textarea[name="headers"]').value = '';
+});
+</script>
+</body>
+</html>
