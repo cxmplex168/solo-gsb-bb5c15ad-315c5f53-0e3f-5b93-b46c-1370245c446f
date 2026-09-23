@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>邮件投递路径检查器</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --line: #334155;
+    --accent: #38bdf8;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --error: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC",
+      "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  textarea {
+    width: 100%; min-height: 240px; resize: vertical;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; font: 12.5px/1.6 ui-monospace, SFMono-Regular,
+      Menlo, Consolas, monospace;
+  }
+  textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .toolbar { display: flex; gap: 10px; margin: 12px 0 24px; flex-wrap: wrap; }
+  button {
+    border: 0; border-radius: 8px; padding: 9px 18px;
+    font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  .btn-primary { background: var(--accent); color: #082f49; }
+  .btn-ghost { background: var(--panel-2); color: var(--text); }
+  button:hover { filter: brightness(1.1); }
+  .stats {
+    display: grid; gap: 12px; margin-bottom: 22px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .stat {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .stat .num { font-size: 22px; font-weight: 700; }
+  .stat .label { color: var(--muted); font-size: 12.5px; }
+  .num.ok { color: var(--ok); }
+  .num.warn { color: var(--warn); }
+  .num.error { color: var(--error); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px 18px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 10px; }
+  .banner {
+    background: #3b1d24; border: 1px solid var(--error);
+    color: #fecdd3; border-radius: 10px; padding: 12px 16px;
+    margin-bottom: 18px;
+  }
+  .summary {
+    display: grid; gap: 8px 24px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+  .summary div { font-size: 13.5px; }
+  .summary .k { color: var(--muted); margin-right: 8px; }
+  .summary .v { word-break: break-all; }
+  .timeline { position: relative; margin-top: 8px; }
+  .hop {
+    position: relative; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 18px 14px 22px; margin-bottom: 18px;
+  }
+  .hop::before {
+    content: ""; position: absolute; left: -22px; top: 26px;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--bg);
+  }
+  .timeline::before {
+    content: ""; position: absolute; left: -16px; top: 8px; bottom: 8px;
+    width: 2px; background: var(--line);
+  }
+  .hop-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .hop-idx {
+    background: var(--accent); color: #082f49; font-weight: 700;
+    border-radius: 999px; padding: 1px 10px; font-size: 12.5px;
+  }
+  .hop-node { font-size: 16px; font-weight: 700; word-break: break-all; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .hop-time { margin: 8px 0; font-size: 13.5px; }
+  .hop-time strong { color: var(--ok); }
+  .hop-grid {
+    display: grid; gap: 4px 24px; margin: 8px 0;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    font-size: 13px;
+  }
+  .hop-grid .k { color: var(--muted); margin-right: 6px; }
+  .anomalies { list-style: none; padding: 0; margin: 10px 0 0; }
+  .anomalies li {
+    border-radius: 8px; padding: 7px 12px; margin-top: 6px;
+    font-size: 13px;
+  }
+  .anomalies li.error { background: #3b1d24; color: #fecdd3; border: 1px solid #7f1d1d; }
+  .anomalies li.warn { background: #3a2f10; color: #fde68a; border: 1px solid #78350f; }
+  .delay {
+    display: inline-block; margin-top: 8px; font-size: 13px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 12px;
+  }
+  .delay.bad { border-color: var(--warn); color: var(--warn); }
+  .delay.na { color: var(--muted); }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  pre.raw {
+    background: #0b1220; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; overflow-x: auto; margin: 8px 0 0;
+    font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .legend { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
+  code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📮 邮件投递路径检查器</h1>
+  <p class="subtitle">
+    粘贴邮件原始头部（含 <code>Received</code> 字段），自动展开折行、按实际投递顺序排列中继节点并计算相邻节点耗时。
+    顺序自上而下为：发件方 → 收件方。
+  </p>
+
+  <form method="post" action="/analyze">
+    <textarea name="headers" id="headers"
+      placeholder="例如：&#10;Received: from mail.example.com ...&#10;    by mx.example.net; Tue, 23 Sep 2026 10:00:00 +0800">{{ raw_headers or '' }}</textarea>
+    <div class="toolbar">
+      <button class="btn-primary" type="submit">分析投递路径</button>
+      <button class="btn-ghost" type="button" id="fillSample">填入示例</button>
+      <button class="btn-ghost" type="button" id="clearInput">清空</button>
+      <span class="hint" style="align-self:center;">输入上限 {{ max_input_kb }} KB（MAX_INPUT_KB）</span>
+    </div>
+  </form>
+
+  {% if result %}
+    {% if result.error %}
+      <div class="banner">{{ result.error }}</div>
+    {% else %}
+      <div class="stats">
+        <div class="stat"><div class="num">{{ result.hop_count }}</div><div class="label">中继节点（Received）</div></div>
+        <div class="stat"><div class="num ok">{{ result.timed_count }}</div><div class="label">成功解析时间</div></div>
+        <div class="stat"><div class="num warn">{{ result.missing_count }}</div><div class="label">缺少/异常时间</div></div>
+        <div class="stat"><div class="num {% if result.error_count %}error{% endif %}">{{ result.error_count }}</div><div class="label">解析错误</div></div>
+        <div class="stat"><div class="num {% if result.warn_count %}warn{% endif %}">{{ result.warn_count }}</div><div class="label">告警</div></div>
+        <div class="stat"><div class="num">{{ result.total_span_human or '—' }}</div><div class="label">端到端耗时</div></div>
+      </div>
+
+      {% if result.summary %}
+      <div class="card">
+        <h2>主要头部字段</h2>
+        <div class="summary">
+          {% for key, val in result.summary.items() %}
+          <div><span class="k">{{ key }}:</span><span class="v">{{ val }}</span></div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="timeline">
+        {% for hop in result.path %}
+        <div class="hop">
+          <div class="hop-head">
+            <span class="hop-idx">#{{ hop.path_index }}</span>
+            <span class="hop-node">{{ hop.node }}</span>
+            <span class="hint">{{ hop.direction_hint }}</span>
+          </div>
+
+          <div class="hop-time">
+            时间（UTC）：
+            {% if hop.time_utc %}<strong>{{ hop.time_utc }}</strong>
+              {% if hop.naive_assumed_utc %}<span class="hint">（原时间无时区，按 UTC 处理）</span>{% endif %}
+            {% else %}<strong style="color:var(--error)">无法解析 / 缺失</strong>{% endif %}
+            {% if hop.date_raw %}<div class="hint">原始时间串：{{ hop.date_raw }}</div>{% endif %}
+          </div>
+
+          <div class="hop-grid">
+            {% if hop.from_host %}<div><span class="k">from</span>{{ hop.from_host }}</div>{% endif %}
+            {% if hop.by_host %}<div><span class="k">by</span>{{ hop.by_host }}</div>{% endif %}
+            {% if hop.via %}<div><span class="k">via</span>{{ hop.via }}</div>{% endif %}
+            {% if hop.with_proto %}<div><span class="k">with</span>{{ hop.with_proto }}</div>{% endif %}
+            {% if hop.id %}<div><span class="k">id</span>{{ hop.id }}</div>{% endif %}
+            {% if hop.ip %}<div><span class="k">对端 IP</span>{{ hop.ip }}</div>{% endif %}
+          </div>
+
+          {% if hop.path_index == 1 %}
+            <span class="delay na">首跳：无上游耗时</span>
+          {% elif hop.delay_human %}
+            <span class="delay {% if hop.delay_seconds < 0 %}bad{% endif %}">
+              距上一节点 {{ hop.delay_from }}：{{ hop.delay_human }}
+            </span>
+          {% else %}
+            <span class="delay na">耗时不可计算（上游或本节点缺少有效时间）</span>
+          {% endif %}
+
+          {% if hop.anomalies %}
+          <ul class="anomalies">
+            {% for a in hop.anomalies %}
+            <li class="{{ a.level }}">{{ '⛔ 错误' if a.level == 'error' else '⚠️ 告警' }}：{{ a.message }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+
+          <details>
+            <summary>查看原始 Received 字段（保留折行）</summary>
+            <pre class="raw">{{ hop.raw }}</pre>
+          </details>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endif %}
+
+  <p class="legend">
+    排序依据：<code>Received</code> 字段由最终接收服务器在顶部追加，因此解析时按其嵌套结构反转，
+    得到真实投递顺序；当某节点时间戳早于其上游时会标记时钟偏移告警。所有时间统一换算为 UTC 展示。
+  </p>
+</div>
+
+<script>
+  const ta = document.getElementById('headers');
+  document.getElementById('fillSample').addEventListener('click', () => {
+    ta.value = {{ sample | tojson }};
+  });
+  document.getElementById('clearInput').addEventListener('click', () => {
+    ta.value = '';
+    ta.focus();
+  });
+</script>
+</body>
+</html>
